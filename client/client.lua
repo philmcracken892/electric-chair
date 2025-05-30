@@ -1,4 +1,3 @@
-
 local RSGCore = exports['rsg-core']:GetCoreObject()
 
 local PromptGroup1 = GetRandomIntInRange(0, 0xffffff) 
@@ -12,8 +11,14 @@ local PrisonerSeated = false
 
 local PrisonerPed
 local PrisonerSource
+local ElectricHelmet = nil
 
 local EntitiesIds = { }
+
+-- New FX variables - Using RDR2 compatible effects
+local fx_group = "scr_dm_ftb"
+local fx_name = "scr_mp_chest_spawn_smoke"
+local fx_scale = 1.0
 
 Citizen.CreateThread(function()
     Citizen.Wait(2000)
@@ -108,10 +113,10 @@ Citizen.CreateThread(function()
     while true do Wait(Optimizer)
         local Ped = PlayerPedId()
         local PCoord = GetEntityCoords(Ped)
-        local Chair = GetClosestObjectOfType(PCoord, 2.0, GetHashKey('p_cs_electricchair01x'), false, false, false)
+        local Chair = GetClosestObjectOfType(PCoord, 20.0, GetHashKey('p_cs_electricchair01x'), false, false, false)
         local ChairCoord = GetEntityCoords(Chair)
         local Dist = Vdist(PCoord - ChairCoord)
-        local Generator = GetClosestObjectOfType(PCoord, 2.0, GetHashKey('p_cs_generator01x'), false, false, false)
+        local Generator = GetClosestObjectOfType(PCoord, 20.0, GetHashKey('p_cs_generator01x'), false, false, false)
         local GeneratorCoord = GetEntityCoords(Generator)
         local Dist2 = Vdist(PCoord - GeneratorCoord)
         if Dist <= 2 then
@@ -203,6 +208,11 @@ AddEventHandler("ElectricChair:SitInChair", function()
 
     Wait(1000)
 
+    -- Create and attach electric helmet
+	local pedCoords = GetEntityCoords(Ped)
+	ElectricHelmet = CreateObject('p_cs_electrichelmet01x', pedCoords.x, pedCoords.y, pedCoords.z, true, true, false)
+	AttachEntityToEntity(ElectricHelmet, Ped, GetPedBoneIndex(Ped, 21030), 0.15, 0.0, 0.0, 0.0, -90.0, -170.0, false, false, false, false, 2, true)
+	table.insert(EntitiesIds, ElectricHelmet)
     local animDict2 = "script_rc@rtl@leadout@rc_6"
     local anim2 = "leadout_alive_prisoner"
     while not HasAnimDictLoaded(animDict2) do
@@ -230,10 +240,10 @@ RegisterNetEvent("ElectricChair:SyncedFX")
 AddEventHandler("ElectricChair:SyncedFX", function(prisonerSource)
     local PrisonerPed = GetPlayerPed(GetPlayerFromServerId(prisonerSource))
     if not DoesEntityExist(PrisonerPed) then
-       
         return
     end
 
+    -- Original electric arc effects
     local ptfxDict = "cut_rrtl"
     local ptfxName = "cs_rrtl_electric_arcs"
 
@@ -253,6 +263,7 @@ AddEventHandler("ElectricChair:SyncedFX", function(prisonerSource)
         scale = 3.0
     end
 	
+	-- Flash effect
 	local flashHandle = Citizen.InvokeNative(
     0x9C56621462FFE7A6,
     "scr_re_rhf_elec_flash",
@@ -264,8 +275,7 @@ AddEventHandler("ElectricChair:SyncedFX", function(prisonerSource)
     false, false, false
 	)
 
-
-   
+    -- Load original electric arc dictionary
     local dictHash = GetHashKey(ptfxDict)
     if not Citizen.InvokeNative(0x65BB72F29138F5D6, dictHash) then
         Citizen.InvokeNative(0xF2B2353BBC0D4E8F, dictHash)
@@ -276,48 +286,71 @@ AddEventHandler("ElectricChair:SyncedFX", function(prisonerSource)
         end
     end
 
+    -- Load original electric arc dictionary
+    local dictHash = GetHashKey(ptfxDict)
     if not Citizen.InvokeNative(0x65BB72F29138F5D6, dictHash) then
-       
-        return
-    end
-
-    Citizen.InvokeNative(0xA10DB07FC234DD12, ptfxDict)
-
-    local activeFx = {}
-
-    for _, bone in ipairs(boneList) do
-        local fxHandle = Citizen.InvokeNative(
-            0x9C56621462FFE7A6, 
-            ptfxName,
-            PrisonerPed,
-            0.0, 0.0, 0.1,      
-            -90.0, 0.0, 0.0,    
-            bone,
-            scale,
-            false, false, false
-        )
-        if fxHandle then
-            table.insert(activeFx, fxHandle)
+        Citizen.InvokeNative(0xF2B2353BBC0D4E8F, dictHash)
+        local timeout = 0
+        while not Citizen.InvokeNative(0x65BB72F29138F5D6, dictHash) and timeout < 5000 do
+            Citizen.Wait(10)
+            timeout += 10
         end
     end
 
-   
+    -- Add smoke effect (independent of electric arc loading)
+    local prisonerCoords = GetEntityCoords(PrisonerPed)
+    local fxcoords = vector3(prisonerCoords.x, prisonerCoords.y, prisonerCoords.z + 0.5)
+    UseParticleFxAsset(fx_group)
+    local smoke = StartParticleFxNonLoopedAtCoord(fx_name, fxcoords, 0.0, 0.0, 0.0, fx_scale, false, false, false, true)
 
-    Wait(4000)
+    if Citizen.InvokeNative(0x65BB72F29138F5D6, dictHash) then
+        Citizen.InvokeNative(0xA10DB07FC234DD12, ptfxDict)
 
-    for _, fxHandle in ipairs(activeFx) do
-        if Citizen.InvokeNative(0x9DD5AFF561E88F2A, fxHandle) then 
-            Citizen.InvokeNative(0x459598F579C98929, fxHandle, false) 
+        local activeFx = {}
+
+        for _, bone in ipairs(boneList) do
+            local fxHandle = Citizen.InvokeNative(
+                0x9C56621462FFE7A6, 
+                ptfxName,
+                PrisonerPed,
+                0.0, 0.0, 0.1,      
+                -90.0, 0.0, 0.0,    
+                bone,
+                scale,
+                false, false, false
+            )
+            if fxHandle then
+                table.insert(activeFx, fxHandle)
+            end
+        end
+
+        Wait(4000)
+
+        -- Clean up electric arc effects
+        for _, fxHandle in ipairs(activeFx) do
+            if Citizen.InvokeNative(0x9DD5AFF561E88F2A, fxHandle) then 
+                Citizen.InvokeNative(0x459598F579C98929, fxHandle, false) 
+            end
         end
     end
-
-   
 end)
-
 
 RegisterNetEvent("ElectricChair:KillMe")
 AddEventHandler("ElectricChair:KillMe", function()
+    -- Remove helmet before death
+    if ElectricHelmet and DoesEntityExist(ElectricHelmet) then
+        DeleteEntity(ElectricHelmet)
+        ElectricHelmet = nil
+    end
     ApplyDamageToPed(PlayerPedId(), 10000, true, 54890, PlayerPedId())
+end)
+
+RegisterNetEvent("ElectricChair:RemoveHelmet")
+AddEventHandler("ElectricChair:RemoveHelmet", function()
+    if ElectricHelmet and DoesEntityExist(ElectricHelmet) then
+        DeleteEntity(ElectricHelmet)
+        ElectricHelmet = nil
+    end
 end)
 
 _IsAnimSceneLoaded = function(animscene)
@@ -351,20 +384,18 @@ function Electrocute()
     end
 end
 
-
 function ElectrocuteKill()
     local ClosestPlayers = GetClosestPlayers()
     if PrisonerSource then
         TriggerServerEvent('ElectricChair:SyncFX', ClosestPlayers, PrisonerSource)
         lib.notify({
-            title = '💀 Fatal Shock',
+            title = ' Fatal Shock',
             description = 'Prisoner has been executed!',
             type = 'error',
             duration = 5000
         })
     end
 end
-
 
 function GetClosestPlayers()
     local Ped = PlayerPedId()
